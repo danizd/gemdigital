@@ -1,0 +1,23 @@
+{
+  "name": "gdt-santiago",
+  "version": "0.1.0",
+  "description": "Gemelo Digital Topografico de Santiago de Compostela - Cliente web CesiumJS",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "lint": "eslint src --ext .ts"
+  },
+  "dependencies": {
+    "cesium": "^1.114.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.60.0",
+    "@types/node": "^20.11.0",
+    "typescript": "^5.3.3",
+    "vite": "^5.0.11",
+    "vite-plugin-static-copy": "^1.0.0"
+  },
+  "license": "Apache-2.0"
+}

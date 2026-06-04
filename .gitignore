@@ -1,0 +1,35 @@
+# Dependencias
+node_modules/
+dist/
+public/tiles/
+
+# Datos geoespaciales grandes
+pipeline/data/raw/
+pipeline/data/processed/
+
+# Archivos temporales
+.tmp-*
+*.timestamp-*.mjs
+playwright-diagnose.png
+
+# Variables de entorno
+.env
+
+# Python
+pipeline/.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Sistema operativo
+.DS_Store
+Thumbs.db

@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="gl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Gemelo Digital Topografico de Santiago de Compostela - Explora o territorio en 3D" />
+  <title>GDT-Santiago</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏛️</text></svg>">
+  <link rel="stylesheet" href="/src/styles/main.css" />
+</head>
+<body>
+  <div id="app">
+    <div id="cesium-container"></div>
+    <div id="ui-overlay">
+      <header class="app-header">
+        <h1>GDT-Santiago</h1>
+        <span class="subtitle">Gemelo Digital Topografico</span>
+      </header>
+      <nav class="controls-nav">
+        <button id="btn-reset-camera" class="control-btn" title="Recentrar na Catedral">
+          <span class="icon">🏛️</span>
+          <span class="label">Catedral</span>
+        </button>
+        <button id="btn-toggle-layers" class="control-btn" title="Capas">
+          <span class="icon">🗺️</span>
+          <span class="label">Capas</span>
+        </button>
+        <button id="btn-about" class="control-btn" title="Acerca de">
+          <span class="icon">ℹ️</span>
+          <span class="label">Acerca</span>
+        </button>
+      </nav>
+      <div id="loading-indicator" class="loading-overlay">
+        <div class="spinner"></div>
+        <p>Cargando Gemelo Digital...</p>
+      </div>
+    </div>
+  </div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

@@ -1,0 +1,96 @@
+# Docker Compose para o GDT-Santiago - Fase 1 (Demo)
+# Despliegue monolitico en servidor unico (Oracle Free Tier)
+# Servicios: app-cliente (nginx), postgis, pg_tileserv, nginx-proxy-manager
+
+version: '3.8'
+
+services:
+  # --- Cliente web (SPA servida por nginx) ---
+  app-cliente:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: gdt-app
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    volumes:
+      # Monta tiles prexerados no contenedor nginx
+      - /data/gdt/tiles:/usr/share/nginx/html/tiles:ro
+    networks:
+      - gdt-network
+    depends_on:
+      - postgis
+    environment:
+      - NODE_ENV=production
+
+  # --- Base de datos espacial (PostGIS) ---
+  postgis:
+    image: postgis/postgis:16-3.4
+    container_name: gdt-postgis
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-gdt_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-gdt_password}
+      POSTGRES_DB: ${POSTGRES_DB:-gdt_santiago}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgis-data:/var/lib/postgresql/data
+      # Scripts de inicializacion (schema, datos iniciais)
+      - ./sql/init:/docker-entrypoint-initdb.d:ro
+    networks:
+      - gdt-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-gdt_user} -d ${POSTGRES_DB:-gdt_santiago}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # --- Servidor de tiles vectoriais (pg_tileserv) ---
+  pg_tileserv:
+    image: pramsey/pg_tileserv:latest
+    container_name: gdt-tileserv
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-gdt_user}:${POSTGRES_PASSWORD:-gdt_password}@postgis:5432/${POSTGRES_DB:-gdt_santiago}
+      TS_DEFAULT_MIN_ZOOM: 0
+      TS_DEFAULT_MAX_ZOOM: 22
+      TS_SRID: 25829
+    depends_on:
+      postgis:
+        condition: service_healthy
+    networks:
+      - gdt-network
+
+  # --- Proxy inverso con TLS (nginx proxy manager) ---
+  # NOTA: En Fase 1, pode estar desactivado se o despliegue e local.
+  # En produccion (gemelo.movilab.es), NPM xestionaria o TLS.
+  nginx-proxy-manager:
+    image: jc21/nginx-proxy-manager:latest
+    container_name: gdt-npm
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "81:81"  # Interface de administracion
+    volumes:
+      - npm-data:/data
+      - npm-letsencrypt:/etc/letsencrypt
+    networks:
+      - gdt-network
+    # En Fase 1 (desenvolvemento local), este servizo pode estar comentado
+    # ou configurado sen dominio. En Fase 2, configura o host gemelo.movilab.es
+
+# --- Redes ---
+networks:
+  gdt-network:
+    driver: bridge
+
+# --- Volumes persistentes ---
+volumes:
+  postgis-data:
+    driver: local
+  npm-data:
+    driver: local
+  npm-letsencrypt:
+    driver: local

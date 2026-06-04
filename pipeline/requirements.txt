@@ -1,0 +1,16 @@
+# Pipeline Offline - Dependencias Python
+# Instalar con: pip install -r requirements.txt
+
+# HTTP requests (usado por todos los scripts)
+requests>=2.31.0
+
+# Servicios OGC (WCS/WFS) para CNIG
+owslib>=0.29.0
+
+# Procesamiento geoespacial
+pyproj>=3.6.0
+shapely>=2.0.0
+
+# Utilidades
+click>=8.1.0
+tqdm>=4.66.0
