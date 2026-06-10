@@ -21,8 +21,9 @@ async function main(): Promise<void> {
     const uiManager = new UIManager(viewer);
     uiManager.initialize();
 
-    // Log de posicion para debugging (solo en desarrollo)
+    // Exponer viewer globalmente en desarrollo para debugging y tests E2E
     if (import.meta.env.DEV) {
+      (window as any).__GDT_VIEWER__ = viewer;
       console.info('GDT-Santiago inicializado. Posicion da camara:', viewer.getCameraPosition());
     }
   } catch (error) {

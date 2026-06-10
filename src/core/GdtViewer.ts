@@ -2,7 +2,7 @@ import {
   Viewer,
   Cartesian3,
   Math as CesiumMath,
-  Terrain,
+  CesiumTerrainProvider,
   SceneMode,
   ScreenSpaceEventType,
   ScreenSpaceEventHandler,
@@ -28,6 +28,8 @@ export class GdtViewer {
   private viewer: Viewer | null = null;
   private container: HTMLElement;
   private readonly catedralPosition: Cartesian3;
+  private hillshadeLayer: ImageryLayer | null = null;
+  private hillshadeVisible = false;
 
   constructor(containerId: string) {
     const element = document.getElementById(containerId);
@@ -53,13 +55,17 @@ export class GdtViewer {
     // y establecer aqui: Ion.defaultAccessToken = import.meta.env.VITE_CESIUM_ION_TOKEN;
     // Para desarrollo, CesiumJS usa un token por defecto con limites de rate.
 
+    const terrainProvider = await CesiumTerrainProvider.fromUrl('./tiles/v1/terrain/', {
+      requestVertexNormals: false,
+      requestWaterMask: false,
+    });
+    console.info('[GDT] Terreno local heightmap cargado desde /tiles/v1/terrain/');
+
     this.viewer = new Viewer(this.container, {
-      // Fase 1: Usar elipsoide plano para carga rapida
-      // Fase 2/H1: Cambiar a Terrain.fromWorldTerrain() o tiles propios
-      terrain: undefined,
+      terrainProvider,
       shadows: false,              // Deshabilitar para mejor rendimiento inicial
       skyAtmosphere: undefined,    // Sin atmosfera (mas ligero)
-      requestRenderMode: true,     // Renderizado por demanda
+      requestRenderMode: false,    // Renderizado continuo para validar refinamiento de terreno
       sceneMode: SceneMode.SCENE3D,
       baseLayer: false,
       baseLayerPicker: false,
@@ -77,19 +83,22 @@ export class GdtViewer {
     this.configureScene();
     this.setupEventHandlers();
     await this.addBaseLayer();
-    await this.addLocalHillshadeLayer();
 
-    // Posicionar directamente en Santiago sin animacion inicial
-    // (la animacion flyTo causa problemas de rendimiento al inicio)
+    await this.addLocalHillshadeLayer();
+    this.showHillshade();
+
+    const { destination, distance } = INITIAL_CAMERA_VIEW;
+    const initialCameraDestination = Cartesian3.fromDegrees(
+      destination.longitude,
+      destination.latitude - 0.02,
+      destination.height + distance
+    );
+
     this.viewer.camera.setView({
-      destination: Cartesian3.fromDegrees(
-        CATEDRAL_COORDINATES.longitude,
-        CATEDRAL_COORDINATES.latitude,
-        25000
-      ),
+      destination: initialCameraDestination,
       orientation: {
         heading: 0.0,
-        pitch: -CesiumMath.PI_OVER_TWO,
+        pitch: INITIAL_CAMERA_VIEW.orientation.pitch,
         roll: 0.0,
       },
     });
@@ -105,13 +114,16 @@ export class GdtViewer {
     if (!this.viewer) return;
 
     try {
-      const { TileMapServiceImageryProvider } = await import('cesium');
-      const baseProvider = await TileMapServiceImageryProvider.fromUrl(
-        './cesium/Assets/Textures/NaturalEarthII'
-      );
+      const baseProvider = new UrlTemplateImageryProvider({
+        url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+        minimumLevel: 0,
+        maximumLevel: 19,
+        tileWidth: 256,
+        tileHeight: 256,
+      });
 
       this.viewer.imageryLayers.addImageryProvider(baseProvider);
-      console.info('[GDT] Capa base NaturalEarthII añadida');
+      console.info('[GDT] Capa base OpenStreetMap añadida');
     } catch (error) {
       console.warn('[GDT] No se pudo cargar capa base:', error);
     }
@@ -148,18 +160,58 @@ export class GdtViewer {
         }
       });
 
-      const hillshadeLayer = new ImageryLayer(hillshadeProvider, {
-        alpha: 0.5, // Semi-transparente para no tapar el terreno base
+      this.hillshadeLayer = new ImageryLayer(hillshadeProvider, {
+        alpha: 0.0, // Inicialmente invisible; se activa via showHillshade
         brightness: 1.1,
         contrast: 1.2,
       });
 
       // Añadir despues de la capa base para que sea overlay
-      this.viewer.imageryLayers.add(hillshadeLayer);
+      this.viewer.imageryLayers.add(this.hillshadeLayer);
       console.info('[GDT] Capa de hillshade añadida (DEM 2m CNIG) - Santiago zona Focus');
     } catch (error) {
       console.warn('[GDT] No se pudo cargar capa de hillshade:', error);
     }
+  }
+
+  /**
+   * Activa la visibilidad de la capa de hillshade.
+   */
+  public showHillshade(): void {
+    if (this.hillshadeLayer) {
+      this.hillshadeLayer.alpha = 0.5;
+      this.hillshadeVisible = true;
+    }
+  }
+
+  /**
+   * Oculta la capa de hillshade.
+   */
+  public hideHillshade(): void {
+    if (this.hillshadeLayer) {
+      this.hillshadeLayer.alpha = 0.0;
+      this.hillshadeVisible = false;
+    }
+  }
+
+  /**
+   * Alterna la visibilidad de la capa de hillshade.
+   * Devuelve el estado actual despues del toggle.
+   */
+  public toggleHillshade(): boolean {
+    if (this.hillshadeVisible) {
+      this.hideHillshade();
+    } else {
+      this.showHillshade();
+    }
+    return this.hillshadeVisible;
+  }
+
+  /**
+   * Indica si la capa de hillshade esta visible actualmente.
+   */
+  public isHillshadeVisible(): boolean {
+    return this.hillshadeVisible;
   }
 
   /**
@@ -182,6 +234,8 @@ export class GdtViewer {
 
     // Habilita iluminacion del sol para sombras naturales
     scene.globe.enableLighting = false;
+    scene.verticalExaggeration = VIEWER_OPTIONS.terrainExaggeration;
+    scene.globe.maximumScreenSpaceError = 0.5;
 
     // Oculta el credito de Cesium en esquina (cumple licencia mostrandolo en "Acerca de")
     (this.viewer.cesiumWidget.creditContainer as HTMLElement).style.display = 'none';

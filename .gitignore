@@ -11,6 +11,8 @@ pipeline/data/processed/
 .tmp-*
 *.timestamp-*.mjs
 playwright-diagnose.png
+test-results/
+package-lock.json
 
 # Variables de entorno
 .env

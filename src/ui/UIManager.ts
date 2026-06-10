@@ -108,15 +108,149 @@ export class UIManager {
   }
 
   /**
-   * Vincula el boton "Capas" (placeholder para Fase 2).
+   * Vincula el boton "Capas" para mostrar/ocultar el panel de capas activas.
    */
   private bindLayersButton(): void {
     if (!this.layersButton) return;
 
     this.layersButton.addEventListener('click', () => {
-      // TODO(Fase 2): Implementar panel de capas (Hidrografia, Curvas, Camino)
-      alert('Panel de capas disponible en Fase 2.\nActualmente se muestra terreno base.');
+      this.toggleLayersPanel();
     });
+  }
+
+  /**
+   * Definicion completa de todas las capas planificadas del GDT-Santiago.
+   * Cada capa indica si esta implementada, si es toggleable y su estado actual.
+   */
+  private getLayersConfig(): Array<{
+    id: string;
+    name: string;
+    category: string;
+    implemented: boolean;
+    alwaysOn?: boolean;
+    checked: boolean;
+    onToggle?: () => void;
+  }> {
+    return [
+      {
+        id: 'base-osm',
+        name: 'Terreno base (OpenStreetMap)',
+        category: 'Base',
+        implemented: true,
+        alwaysOn: true,
+        checked: true,
+      },
+      {
+        id: 'hillshade',
+        name: 'Relieve (Hillshade DEM 2m)',
+        category: 'Relieve',
+        implemented: true,
+        checked: this.viewer.isHillshadeVisible(),
+        onToggle: () => this.viewer.toggleHillshade(),
+      },
+      {
+        id: 'buildings-high',
+        name: 'Edificios 3D - Alto detalle (LIDAR)',
+        category: 'Edificios',
+        implemented: false,
+        checked: false,
+      },
+      {
+        id: 'buildings-low',
+        name: 'Edificios 3D - Bajo detalle (OSM)',
+        category: 'Edificios',
+        implemented: false,
+        checked: false,
+      },
+      {
+        id: 'hydrography',
+        name: 'Hidrografia (rios)',
+        category: 'Vectorial',
+        implemented: false,
+        checked: false,
+      },
+      {
+        id: 'contours',
+        name: 'Curvas de nivel',
+        category: 'Vectorial',
+        implemented: false,
+        checked: false,
+      },
+      {
+        id: 'camino-hitos',
+        name: 'Camino de Santiago (hitos)',
+        category: 'Vectorial',
+        implemented: false,
+        checked: false,
+      },
+    ];
+  }
+
+  /**
+   * Alterna la visibilidad del panel de capas.
+   */
+  private toggleLayersPanel(): void {
+    const existingPanel = document.getElementById('layers-panel');
+    if (existingPanel) {
+      existingPanel.remove();
+      return;
+    }
+
+    const layers = this.getLayersConfig();
+
+    const panel = document.createElement('div');
+    panel.id = 'layers-panel';
+    panel.className = 'layers-panel';
+
+    let currentCategory = '';
+    let layersHtml = '';
+
+    for (const layer of layers) {
+      if (layer.category !== currentCategory) {
+        currentCategory = layer.category;
+        layersHtml += `<div class="layer-category">${currentCategory}</div>`;
+      }
+
+      const isDisabled = !layer.implemented || layer.alwaysOn;
+      const disabledAttr = isDisabled ? 'disabled' : '';
+      const checkedAttr = layer.checked ? 'checked' : '';
+      const badge = layer.implemented ? '' : '<span class="layer-badge">Proximamente</span>';
+      const cursorClass = layer.implemented ? '' : 'layer-item-disabled';
+
+      layersHtml += `
+        <label class="layer-item ${cursorClass}">
+          <input type="checkbox" id="layer-${layer.id}" ${checkedAttr} ${disabledAttr} />
+          <span class="layer-name">${layer.name}</span>
+          ${badge}
+        </label>
+      `;
+    }
+
+    panel.innerHTML = `
+      <div class="layers-header">
+        <h3>Capas</h3>
+        <button class="layers-close">&times;</button>
+      </div>
+      <div class="layers-list">
+        ${layersHtml}
+      </div>
+    `;
+
+    document.body.appendChild(panel);
+
+    // Cerrar panel
+    panel.querySelector('.layers-close')?.addEventListener('click', () => panel.remove());
+    panel.addEventListener('click', (e) => {
+      if (e.target === panel) panel.remove();
+    });
+
+    // Vincular toggles de capas implementadas
+    for (const layer of layers) {
+      if (layer.implemented && layer.onToggle) {
+        const checkbox = panel.querySelector<HTMLInputElement>(`#layer-${layer.id}`);
+        checkbox?.addEventListener('change', layer.onToggle);
+      }
+    }
   }
 
   /**

@@ -315,6 +315,117 @@ html, body, #app {
   }
 }
 
+/* Panel de capas */
+.layers-panel {
+  position: fixed;
+  bottom: 88px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--color-bg-dark);
+  backdrop-filter: blur(8px);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow);
+  z-index: 50;
+  min-width: 280px;
+  animation: slideUp 0.2s ease;
+  pointer-events: auto;
+}
+
+.layers-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.layers-header h3 {
+  color: var(--color-text-light);
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.layers-close {
+  background: none;
+  border: none;
+  color: var(--color-text-light);
+  font-size: 1.3rem;
+  cursor: pointer;
+  opacity: 0.6;
+  transition: opacity var(--transition-fast);
+  line-height: 1;
+}
+
+.layers-close:hover {
+  opacity: 1;
+}
+
+.layers-list {
+  padding: 8px 0;
+}
+
+.layer-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  color: var(--color-text-light);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+  font-size: 0.9rem;
+}
+
+.layer-item:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.layer-item input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--color-secondary);
+  cursor: pointer;
+}
+
+.layer-item input[type="checkbox"]:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.layer-name {
+  flex: 1;
+}
+
+.layer-category {
+  color: var(--color-secondary);
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  padding: 10px 16px 4px;
+  border-top: 1px solid var(--color-border);
+}
+
+.layer-category:first-child {
+  border-top: none;
+  padding-top: 4px;
+}
+
+.layer-item-disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.layer-badge {
+  font-size: 0.65rem;
+  background: rgba(243, 156, 18, 0.2);
+  color: var(--color-accent);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
 /* Responsive */
 @media (max-width: 640px) {
   .app-header {

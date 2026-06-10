@@ -28,6 +28,7 @@ Antes de cualquier trabajo en este repositorio, leer:
 2. `documentacion/especificaciones_funcionales/core-funcional.md` — Dominio y reglas de negocio
 3. `documentacion/especificaciones_estructurales/core-estructural.md` — Arquitectura y decisiones técnicas
 4. `documentacion/especificaciones_funcionales/capas-gis.md` — Enlaces verificados de descarga de capas geográficas (fuentes de datos)
+5. `documentacion/lecciones_aprendidas.md` — Incidencias reales y decisiones operativas ya aprendidas durante la generación de terreno
 
 ---
 
@@ -43,6 +44,7 @@ Antes de cualquier trabajo en este repositorio, leer:
 | 1 | `documentacion/especificaciones_funcionales/core-funcional.md` | §2 Glosario (Terreno, Focus, Contexto), §4 CU-001, §5 RN-005 | Entender el concepto de Terreno y su separación de overlays |
 | 2 | `documentacion/especificaciones_estructurales/core-estructural.md` | §3.1 ADR-0001 (Render stack CesiumJS), §4 Restricciones técnicas | Conocer el stack de renderizado y límites de rendimiento |
 | 3 | `documentacion/especificaciones_estructurales/core-estructural.md` | §5.1 Patrón Pipeline Offline, §5.2 Patrón Versionado de Tiles | Entender cómo se generan y sirven los tiles |
+| 4 | `documentacion/lecciones_aprendidas.md` | §§2–12 | Evitar repetir errores conocidos de rutas WSL, formato CTB, gzip, `layer.json` y niveles faltantes |
 
 ### Contratos que NO debes romper
 
@@ -164,6 +166,7 @@ Antes de cualquier trabajo en este repositorio, leer:
 | 2 | `documentacion/especificaciones_estructurales/core-estructural.md` | §3.4 ADR-0004 (ETRS89 + EGM2008) | Conversión de alturas es crítica |
 | 3 | `documentacion/especificaciones_funcionales/core-funcional.md` | §2 Glosario (Capa de datos pública) | Restricciones de licencias en fuentes de datos |
 | 4 | `documentacion/especificaciones_funcionales/capas-gis.md` | Completo (URLs verificadas §1–11) | Enlaces de descarga verificados y corregidos para cada capa |
+| 5 | `documentacion/lecciones_aprendidas.md` | Completo | Recoge comandos, errores y decisiones reales del pipeline MDT02→Cesium para no repetir trabajo costoso |
 
 ### Contratos que NO debes romper
 

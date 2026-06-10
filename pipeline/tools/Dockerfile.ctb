@@ -1,0 +1,15 @@
+FROM ubuntu:22.04
+
+RUN apt-get update && apt-get install -y \
+    git cmake build-essential \
+    gdal-bin libgdal-dev \
+    libboost-all-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /opt
+RUN git clone https://github.com/geo-data/cesium-terrain-builder.git
+
+WORKDIR /opt/cesium-terrain-builder/build
+RUN cmake .. && make -j$(nproc) && make install
+
+WORKDIR /data
