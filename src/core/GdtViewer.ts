@@ -10,6 +10,7 @@ import {
   UrlTemplateImageryProvider,
   ImageryLayer,
   Rectangle,
+  Entity,
 } from 'cesium';
 import {
   CATEDRAL_COORDINATES,
@@ -30,6 +31,7 @@ export class GdtViewer {
   private readonly catedralPosition: Cartesian3;
   private hillshadeLayer: ImageryLayer | null = null;
   private hillshadeVisible = false;
+  private buildingsVisible = true;
 
   constructor(containerId: string) {
     const element = document.getElementById(containerId);
@@ -86,6 +88,8 @@ export class GdtViewer {
 
     await this.addLocalHillshadeLayer();
     this.showHillshade();
+
+    await this.addBuildingsOSMEntities();
 
     const { destination, distance } = INITIAL_CAMERA_VIEW;
     const initialCameraDestination = Cartesian3.fromDegrees(
@@ -212,6 +216,102 @@ export class GdtViewer {
    */
   public isHillshadeVisible(): boolean {
     return this.hillshadeVisible;
+  }
+
+  /**
+   * Muestra la capa de edificios 3D OSM.
+   */
+  public showBuildings(): void {
+    if (!this.viewer) return;
+    for (const entity of this.viewer.entities.values) {
+      if (String(entity.id).startsWith('building-')) {
+        entity.show = true;
+      }
+    }
+    this.buildingsVisible = true;
+  }
+
+  /**
+   * Oculta la capa de edificios 3D OSM.
+   */
+  public hideBuildings(): void {
+    if (!this.viewer) return;
+    for (const entity of this.viewer.entities.values) {
+      if (String(entity.id).startsWith('building-')) {
+        entity.show = false;
+      }
+    }
+    this.buildingsVisible = false;
+  }
+
+  /**
+   * Alterna la visibilidad de la capa de edificios 3D OSM.
+   * Devuelve el estado actual despues del toggle.
+   */
+  public toggleBuildings(): boolean {
+    if (this.buildingsVisible) {
+      this.hideBuildings();
+    } else {
+      this.showBuildings();
+    }
+    return this.buildingsVisible;
+  }
+
+  /**
+   * Indica si la capa de edificios 3D OSM esta visible actualmente.
+   */
+  public areBuildingsVisible(): boolean {
+    return this.buildingsVisible;
+  }
+
+  /**
+   * Añade capa de edificios 3D via Cesium.Entity con extrudedHeight (Hito 2B Fase A).
+   * Carga un JSON preprocesado desde ./data/buildings.json y crea un polygon
+   * extruido por edificio. Mas robusto que B3DM manual y mantiene FPS >= 30 con 200 edificios.
+   */
+  private async addBuildingsOSMEntities(): Promise<void> {
+    if (!this.viewer) return;
+
+    try {
+      const response = await fetch('./data/buildings.json');
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const buildings: Array<{
+        id: number;
+        name?: string;
+        height: number;
+        positions: number[][];
+      }> = await response.json();
+
+      this.viewer.entities.suspendEvents();
+      try {
+        for (const b of buildings) {
+          const flatPositions = b.positions.flat();
+          const entity = new Entity({
+            id: `building-${b.id}`,
+            name: b.name,
+            polygon: {
+              hierarchy: Cartesian3.fromDegreesArray(flatPositions),
+              extrudedHeight: b.height,
+              material: Color.SANDYBROWN.withAlpha(0.9),
+              closeBottom: false,
+            },
+          });
+          this.viewer.entities.add(entity);
+        }
+      } finally {
+        this.viewer.entities.resumeEvents();
+      }
+
+      console.info(`[GDT] ${buildings.length} edificios OSM añadidos como Entity (extrudedHeight)`);
+
+      // Centrar camara en el conjunto de edificios
+      await this.viewer.zoomTo(this.viewer.entities);
+    } catch (error) {
+      console.warn('[GDT] No se pudieron cargar edificios OSM:', error);
+    }
   }
 
   /**

@@ -84,6 +84,10 @@ def query_overpass(overpass_ql: str, output_file: Path, timeout: int = 120) -> b
             response = requests.post(
                 OVERPASS_URL,
                 data={'data': overpass_ql},
+                headers={
+                    'User-Agent': 'GDT-Santiago/1.0 (gemdigital research)',
+                    'Accept': 'application/json',
+                },
                 timeout=timeout
             )
             if response.status_code == 429:

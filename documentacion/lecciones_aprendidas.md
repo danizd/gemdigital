@@ -584,3 +584,78 @@ latitude: 42.8805
 ```
 
 Y revisar valores finales de exageración, refinamiento, renderizado y capas base según criterios de Fase 1.
+
+## 22. Hito 2A: Generación manual de 3D Tiles (B3DM/GLB) desde Python — Fracaso documentado
+
+### Contexto
+
+Se intentó generar un tileset 3D Tiles v1.0 para 200 edificios OSM del casco antiguo de Santiago usando `trimesh` (extrusión + exportación GLB) y empaquetado manual B3DM con `struct.pack`. El objetivo era validar el pipeline antes de usar LIDAR real.
+
+### Errores cometidos y resultados
+
+#### 22.1. `trimesh` requiere motor de triangulación instalado
+
+Sin un motor de triangulación, `trimesh` lanza advertencias sobre `triangulate_polygon` y licencias. La solución fue instalar:
+
+```bash
+pip install mapbox-earcut
+```
+
+#### 22.2. B3DM manual con `struct.pack` requiere alineación a 8 bytes
+
+El header de B3DM ocupa 28 bytes. El feature table JSON debe estar **padded a múltiplo de 8 bytes contando desde el inicio del archivo**, no solo a múltiplo de 8 de su propia longitud.
+
+```text
+28 (header) + len(feature_table_json) + padding  ≡  0 (mod 8)
+```
+
+Si no se respeta, Cesium no puede leer el GLB embebido.
+
+#### 22.3. `trimesh` exporta GLB en Z-up; Cesium asume Y-up para glTF 2.0
+
+El GLB generado por `trimesh` usa coordenadas Z-up (X=Este, Y=Norte, Z=Arriba). Cesium, por defecto, interpreta glTF 2.0 como Y-up. Aunque el tileset permite `"gltfUpAxis": "Z"`, el comportamiento en la práctica fue inestable.
+
+Solución aplicada (sin éxito final): rotar el mesh `-90°` en el eje X antes de exportar para convertir Z-up → Y-up y eliminar `"gltfUpAxis"`.
+
+#### 22.4. Coordenadas locales + `transform` ECEF en tileset producen bounding sphere inválido
+
+El tileset.json definía un `transform` columna-major ECEF para posicionar el modelo en el mundo. Cesium calculó un `boundingSphere` con altura `1061 m` (esperado: ~260 m) y radio `5699 m`. Al intentar `viewer.zoomTo(tileset)`, Cesium lanzó:
+
+```text
+DeveloperError: normalized result is not a number
+```
+
+Esto indica que el bounding sphere tenía un vector de longitud cero o NaN, bloqueando la navegación automática.
+
+#### 22.5. Coordenadas ECEF absolutas en el GLB sin `transform` destruyen el bounding sphere
+
+Se probó poner coordenadas ECEF directamente en los vértices del GLB y omitir el `transform` del tileset. El resultado fue un `boundingSphere` con centro en `lat=-90°, lon=0°, height=-6.290.762 m` (centro de la Tierra), demostrando que Cesium interpreta los vértices del GLB como **coordenadas locales del tile**, no como ECEF absolutas.
+
+#### 22.6. El tileset carga sin errores pero no renderiza edificios visibles
+
+A pesar de:
+- `tileset.ready = true`
+- `tileset.tilesLoaded = true`
+- `commands = 1` (un comando de renderizado)
+- Sin errores en consola
+
+Los edificios nunca fueron visiblemente distinguibles en la escena, ni con color rojo brillante (`vec4(1.0, 0.0, 0.0, 1.0)`) como estilo de depuración.
+
+### Conclusión y recomendación
+
+**No generar B3DM/GLB manualmente desde Python para producción.** El formato 3D Tiles tiene requisitos de alineación, padding, coordenadas y bounding volumes que son propensos a errores sutiles cuando se hacen a mano.
+
+Para futuros intentos (Hito 2B / LIDAR), usar herramientas especializadas:
+
+- `py3dtiles` (Python): generación de B3DM/3D Tiles con validación integrada.
+- `3d-tiles-tools` de Cesium (Node.js): toolchain oficial para validar, optimizar y generar tilesets.
+- `gltf-transform` (Node.js): validar y reparar GLB antes de empaquetar.
+
+**Alternativa viable para Hito 2A**: `Cesium.Entity` con `polygon` + `extrudedHeight` es más robusta, permite 200 edificios sin pérdida de rendimiento (FPS > 30) y no requiere dominar el formato binario de 3D Tiles.
+
+### Archivos involucrados
+
+- `pipeline/buildings_simple_3dtiles.py` — script de generación (fracasado).
+- `public/tiles/v1/3dtiles/buildings/buildings.glb` — GLB generado por trimesh.
+- `public/tiles/v1/3dtiles/buildings/tileset.json` — tileset con transform ECEF.
+- `src/core/GdtViewer.ts` — integración `Cesium3DTileset` (desactivada tras el fracaso).

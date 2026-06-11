@@ -19,6 +19,9 @@ Leer specs innecesarias introduce ruido y puede crear inconsistencias.
 - [FEAT-006: Despliegue y Operaciones](#feat-006)
 - [FEAT-007: Evaluación Fase 1 (Demo)](#feat-007)
 
+**Especificación adicional obligatoria para FEAT-003:**
+- `documentacion/especificaciones_funcionales/Pipeline-3D-Tiles.md` — Hito 2B (reemplaza Hito 2A fallido)
+
 ---
 
 ## Spec global del proyecto
@@ -97,16 +100,18 @@ Antes de cualquier trabajo en este repositorio, leer:
 
 ## FEAT-003: Edificios 3D {#feat-003}
 
-**Descripción:** Visualización de edificios en dos niveles de detalle (alto en Focus vía LIDAR, bajo en Contexto vía OSM Buildings) con conmutación automática por distancia.
+**Descripción:** Visualización de edificios en dos niveles de detalle (alto en Focus vía LIDAR, bajo en Contexto vía OSM Buildings) con conmutación automática por distancia. **Hito 2B define la estrategia en dos fases:** Fase A (visualización inmediata con Cesium.Entity para 200 edificios OSM) y Fase B (pipeline de producción con herramientas especializadas para LIDAR/3D Tiles).
 **Módulos involucrados:** Cliente web, Pipeline offline (3D Tiles generation)
 
 ### Especificaciones obligatorias (en este orden)
 
 | Orden | Documento | Secciones a leer | Por qué |
 |---|---|---|---|
-| 1 | `documentacion/especificaciones_funcionales/core-funcional.md` | §2 Glosario (Edificios 3D dos niveles) | Entender el concepto de conmutación por distancia |
-| 2 | `documentacion/especificaciones_estructurales/core-estructural.md` | §3.2 ADR-0002 (Cobertura Focus+Contexto) | Saber qué zonas tienen qué nivel de detalle |
-| 3 | `documentacion/especificaciones_estructurales/core-estructural.md` | §4 Restricciones (almacenamiento 200 GB) | Los 3D Tiles son pesados; verificar espacio disponible |
+| 1 | `documentacion/especificaciones_funcionales/Pipeline-3D-Tiles.md` | §1 Contexto y antecedentes (fracaso Hito 2A), §3 Solución aprobada | Entender por qué falló el pipeline manual y qué estrategia reemplaza |
+| 2 | `documentacion/especificaciones_funcionales/core-funcional.md` | §2 Glosario (Edificios 3D dos niveles) | Entender el concepto de conmutación por distancia |
+| 3 | `documentacion/especificaciones_estructurales/core-estructural.md` | §3.2 ADR-0002 (Cobertura Focus+Contexto) | Saber qué zonas tienen qué nivel de detalle |
+| 4 | `documentacion/especificaciones_estructurales/core-estructural.md` | §4 Restricciones (almacenamiento 200 GB) | Los 3D Tiles son pesados; verificar espacio disponible |
+| 5 | `documentacion/lecciones_aprendidas.md` | §22 Hito 2A — Fracaso documentado | Evitar repetir errores de padding, Z-up, transform ECEF y boundingSphere |
 
 ### Contratos que NO debes romper
 
@@ -115,6 +120,11 @@ Antes de cualquier trabajo en este repositorio, leer:
 - Criterio de conmutación: Distancia cámara < 2 km → alto detalle; > 2 km → bajo detalle
 - CRS: WGS84 elipsoidal para posiciones 3D (Cesium requiere esto)
 - Alturas: Elipsoidales WGS84 (no ortométricas)
+- Fase A (Entity): 200 edificios OSM con extrudedHeight, FPS >= 30, viewer.zoomTo() funcional
+- Fase B (3D Tiles): py3dtiles + gltf-transform + 3d-tiles-tools (NO generación manual)
+- Regla de coordenadas GLB: SIEMPRE coordenadas locales del tile; ECEF va en transform del tileset
+- Regla de eje vertical: SIEMPRE Y-up (estándar glTF 2.0); nunca usar "gltfUpAxis": "Z"
+- Regla de bounding volumes: NO calcular manualmente; usar herramientas especializadas
 ```
 
 ### Señales de alerta
@@ -122,6 +132,9 @@ Antes de cualquier trabajo en este repositorio, leer:
 - Si los edificios aparecen "hundidos" en terrenos en pendiente → verificar corrección EGM2008 en pipeline
 - Si la conmutación entre niveles es brusca → ajustar distancia umbral en configuración cliente
 - Si quieres añadir interiores de edificios → fuera de alcance actual; requiere nuevos datos (Fase 3+)
+- Si intentas generar B3DM manualmente con `struct.pack` → **PARAR**. Ver `Pipeline-3D-Tiles.md` §4.1–4.5
+- Si `tilesLoaded=true` pero edificios invisibles → problema es el bounding sphere, no el shader. Ver `Pipeline-3D-Tiles.md` §4.5
+- Si usas coordenadas ECEF como vértices del GLB → el tileset se romperá. Ver `Pipeline-3D-Tiles.md` §4.1
 
 ---
 
