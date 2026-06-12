@@ -24,6 +24,17 @@ OUTPUT_FILE = PROJECT_ROOT / "public" / "data" / "buildings.json"
 FALLBACK_HEIGHT = 10.0  # m — altura tipica casco antiguo
 LEVELS_HEIGHT_M = 3.5   # m por planta
 
+# Altura representativa por tipo de edificio (building=*) cuando OSM no aporta
+# height ni building:levels. Edificios monumentales del casco antiguo cuyo
+# volumen real supera con creces el fallback generico de 10 m. La catedral se
+# aproxima a la cota de sus torres del Obradoiro (~75 m) para que destaque como
+# ancla visual; el resto a la cubierta de su cuerpo principal.
+HEIGHT_BY_BUILDING_TYPE = {
+    "cathedral": 75.0,
+    "church": 18.0,
+    "chapel": 12.0,
+}
+
 
 def parse_height(tag_value: str) -> float | None:
     """Extrae un numero en metros de un tag OSM como '15', '12.5m', '8 m', etc."""
@@ -54,63 +65,96 @@ def compute_height(tags: dict) -> float:
         if parsed is not None:
             return parsed
 
+    # Prioridad 3: altura representativa segun el tipo de edificio
+    type_height = HEIGHT_BY_BUILDING_TYPE.get(tags.get("building"))
+    if type_height is not None:
+        return type_height
+
     # Fallback
     return FALLBACK_HEIGHT
+
+
+def resolve_ring(node_ids: list[int], node_index: dict) -> list[list[float]] | None:
+    """Convierte una lista de IDs de nodo en un anillo de coordenadas [lon, lat].
+
+    Devuelve None si algun nodo no esta indexado o el anillo no tiene al menos
+    3 vertices (poligono degenerado).
+    """
+    positions: list[list[float]] = []
+    for nid in node_ids:
+        if nid not in node_index:
+            return None
+        lon, lat = node_index[nid]
+        positions.append([lon, lat])
+
+    if len(positions) < 3:
+        return None
+    return positions
 
 
 def load_osm_buildings(path: Path) -> list[dict]:
     """Parsea el JSON de Overpass y devuelve lista de edificios con geometria.
 
     Overpass devuelve nodos como elementos separados de tipo 'node' con lat/lon,
-    y las ways referencian los nodos por ID. Debemos indexar nodos primero.
+    las ways referencian los nodos por ID, y las relaciones (multipolygon)
+    referencian ways por ID en sus members. Indexamos nodos y ways primero.
+
+    Se procesan dos topologias de edificio:
+    - way con building=*: anillo directo desde sus nodos.
+    - relation con building=* (type=multipolygon): se extrae cada miembro con
+      role "outer" como un poligono independiente. Sin este caso, edificios
+      mapeados como relacion (p.ej. la Catedral, relation/5386197) se perdian.
     """
     with open(path, encoding="utf-8") as f:
         data = json.load(f)
 
-    # Indexar todos los nodos por ID
-    node_index = {}
+    # Indexar nodos por ID y ways por ID (para resolver geometria de relaciones)
+    node_index: dict[int, tuple[float, float]] = {}
+    way_index: dict[int, list[int]] = {}
     for element in data.get("elements", []):
         if element["type"] == "node":
             node_index[element["id"]] = (element["lon"], element["lat"])
+        elif element["type"] == "way":
+            way_index[element["id"]] = element.get("nodes", [])
 
-    buildings = []
+    buildings: list[dict] = []
     for element in data.get("elements", []):
-        if element["type"] not in ("way", "relation"):
+        element_type = element["type"]
+        if element_type not in ("way", "relation"):
             continue
 
         tags = element.get("tags", {})
         if "building" not in tags:
             continue
 
-        node_ids = element.get("nodes", [])
-        if len(node_ids) < 3:
-            continue
-
-        # Resolver coordenadas [lon, lat]
-        positions = []
-        valid = True
-        for nid in node_ids:
-            if nid not in node_index:
-                valid = False
-                break
-            lon, lat = node_index[nid]
-            positions.append([lon, lat])
-
-        if not valid or len(positions) < 3:
-            continue
-
-        height = compute_height(tags)
+        height = round(compute_height(tags), 2)
         name = tags.get("name")
 
-        building = {
-            "id": element.get("id"),
-            "height": round(height, 2),
-            "positions": positions,
-        }
-        if name:
-            building["name"] = name
+        # Cada edificio puede generar uno o varios anillos (relaciones con
+        # multiples outer). Se emite una entrada de edificio por anillo valido.
+        rings: list[list[list[float]]] = []
+        if element_type == "way":
+            ring = resolve_ring(element.get("nodes", []), node_index)
+            if ring is not None:
+                rings.append(ring)
+        else:  # relation (multipolygon)
+            for member in element.get("members", []):
+                if member.get("type") != "way" or member.get("role") != "outer":
+                    continue
+                ring = resolve_ring(way_index.get(member.get("ref"), []), node_index)
+                if ring is not None:
+                    rings.append(ring)
 
-        buildings.append(building)
+        for index, ring in enumerate(rings):
+            building = {
+                # Sufijo de parte para anillos multiples: id estable y unico.
+                "id": element.get("id") if len(rings) == 1 else f"{element.get('id')}-{index}",
+                "height": height,
+                "positions": ring,
+            }
+            if name:
+                building["name"] = name
+            buildings.append(building)
 
     return buildings
 
