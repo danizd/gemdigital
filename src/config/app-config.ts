@@ -49,6 +49,18 @@ export const VIEWER_OPTIONS = {
   requestRenderMode: true, // Renderizado por demanda para mejor rendimiento
 } as const;
 
+/**
+ * Exageracion vertical dinamica segun la altura de la camara.
+ * Vista regional: relieve "epico" exagerado. Vista urbana: escala fiel
+ * para que los edificios mantengan proporcion realista con el terreno.
+ */
+export const DYNAMIC_EXAGGERATION = {
+  cameraAltitudeThresholdMeters: 5000, // Frontera regional / urbana
+  regionalExaggeration: 4.0,           // Camara > umbral: efecto paisajistico
+  urbanExaggeration: 1.2,              // Camara <= umbral: fidelidad urbana
+  minChangeThreshold: 0.1,             // Histeresis para evitar parpadeo
+} as const;
+
 /** Umbrales de rendimiento para Fase 1 */
 export const PERFORMANCE_TARGETS = {
   minFps: 30,

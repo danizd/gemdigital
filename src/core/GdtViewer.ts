@@ -10,12 +10,21 @@ import {
   UrlTemplateImageryProvider,
   ImageryLayer,
   Rectangle,
-  Entity,
+  Primitive,
+  GeometryInstance,
+  PolygonGeometry,
+  PolygonHierarchy,
+  Cartographic,
+  ColorGeometryInstanceAttribute,
+  PerInstanceColorAppearance,
+  Ellipsoid,
+  sampleTerrainMostDetailed,
 } from 'cesium';
 import {
   CATEDRAL_COORDINATES,
   INITIAL_CAMERA_VIEW,
   VIEWER_OPTIONS,
+  DYNAMIC_EXAGGERATION,
 } from '../config/app-config';
 
 /**
@@ -32,6 +41,7 @@ export class GdtViewer {
   private hillshadeLayer: ImageryLayer | null = null;
   private hillshadeVisible = false;
   private buildingsVisible = true;
+  private buildingsPrimitive: Primitive | null = null;
 
   constructor(containerId: string) {
     const element = document.getElementById(containerId);
@@ -83,6 +93,7 @@ export class GdtViewer {
     });
 
     this.configureScene();
+    this.setupDynamicExaggeration();
     this.setupEventHandlers();
     await this.addBaseLayer();
 
@@ -222,11 +233,8 @@ export class GdtViewer {
    * Muestra la capa de edificios 3D OSM.
    */
   public showBuildings(): void {
-    if (!this.viewer) return;
-    for (const entity of this.viewer.entities.values) {
-      if (String(entity.id).startsWith('building-')) {
-        entity.show = true;
-      }
+    if (this.buildingsPrimitive) {
+      this.buildingsPrimitive.show = true;
     }
     this.buildingsVisible = true;
   }
@@ -235,11 +243,8 @@ export class GdtViewer {
    * Oculta la capa de edificios 3D OSM.
    */
   public hideBuildings(): void {
-    if (!this.viewer) return;
-    for (const entity of this.viewer.entities.values) {
-      if (String(entity.id).startsWith('building-')) {
-        entity.show = false;
-      }
+    if (this.buildingsPrimitive) {
+      this.buildingsPrimitive.show = false;
     }
     this.buildingsVisible = false;
   }
@@ -265,11 +270,20 @@ export class GdtViewer {
   }
 
   /**
-   * Añade capa de edificios 3D via Cesium.Entity con extrudedHeight (Hito 2B Fase A).
+   * Añade capa de edificios 3D via Cesium.Primitive con GeometryInstance (Hito 2B Fase A).
+   *
+   * Se utiliza Primitive con PerInstanceColorAppearance en lugar de Entity porque:
+   * - El batching de geometria estatica reduce los draw calls de N a 1, eliminando
+   *   el overhead de un Entity por edificio (7.791 objetos de escena individuales).
+   * - Cesium agrupa todas las geometrias en un solo Primitive, procesandolas
+   *   en un web worker (asynchronous: true) sin bloquear el hilo principal.
+   * - Con 7.791 edificios, EntityCollection generaria ~7.791 draw calls,
+   *   mientras que Primitive con GeometryInstance mantiene FPS estables.
+   *
    * Carga un JSON preprocesado desde ./data/buildings.json y crea un polygon
-   * extruido por edificio. Mas robusto que B3DM manual y mantiene FPS >= 30 con 200 edificios.
+   * extruido por edificio agrupado en un unico Primitive.
    */
-  private async addBuildingsOSMEntities(): Promise<void> {
+  private async addBuildingsOSMEntities(): Promise<Primitive | undefined> {
     if (!this.viewer) return;
 
     try {
@@ -278,39 +292,82 @@ export class GdtViewer {
         throw new Error(`HTTP ${response.status}`);
       }
 
-      const buildings: Array<{
-        id: number;
+      const buildings = await response.json() as Array<{
+        id: number | string;
         name?: string;
-        height: number;
+        height: number | null;
         positions: number[][];
-      }> = await response.json();
+      }>;
 
-      this.viewer.entities.suspendEvents();
-      try {
-        for (const b of buildings) {
-          const flatPositions = b.positions.flat();
-          const entity = new Entity({
-            id: `building-${b.id}`,
-            name: b.name,
-            polygon: {
-              hierarchy: Cartesian3.fromDegreesArray(flatPositions),
-              extrudedHeight: b.height,
-              material: Color.SANDYBROWN.withAlpha(0.9),
-              closeBottom: false,
-            },
-          });
-          this.viewer.entities.add(entity);
-        }
-      } finally {
-        this.viewer.entities.resumeEvents();
+      // Solo edificios con anillo poligonal valido (>= 3 vertices)
+      const validBuildings = buildings.filter(
+        (b) => Array.isArray(b.positions) && b.positions.length >= 3
+      );
+
+      // Muestreo de la elevacion del terreno bajo el primer vertice de cada
+      // edificio. Se hace en lote para minimizar peticiones al terrainProvider.
+      const groundSamples = validBuildings.map((b) =>
+        Cartographic.fromDegrees(b.positions[0][0], b.positions[0][1])
+      );
+      await sampleTerrainMostDetailed(this.viewer.terrainProvider, groundSamples);
+
+      const instances: GeometryInstance[] = [];
+      const color = ColorGeometryInstanceAttribute.fromColor(
+        Color.SANDYBROWN.withAlpha(0.85)
+      );
+
+      for (let i = 0; i < validBuildings.length; i++) {
+        const b = validBuildings[i];
+
+        const positions = b.positions.map(([lon, lat]) => {
+          const cartographic = Cartographic.fromDegrees(lon, lat);
+          return Ellipsoid.WGS84.cartographicToCartesian(cartographic);
+        });
+
+        const polygonHierarchy = new PolygonHierarchy(positions);
+        const buildingHeight = b.height ?? 10.0;
+        // Altura del terreno muestreada (NaN si el tile no tiene dato): base 0.
+        const groundHeight = groundSamples[i].height || 0;
+
+        // Alturas reales en metros. Cesium aplica verticalExaggeration
+        // internamente tanto al terreno como a esta primitiva, por lo que NO
+        // se debe multiplicar manualmente: el edificio queda anclado al terreno.
+        const geometry = new PolygonGeometry({
+          polygonHierarchy,
+          height: groundHeight,
+          extrudedHeight: groundHeight + buildingHeight,
+          vertexFormat: PerInstanceColorAppearance.VERTEX_FORMAT,
+        });
+
+        const instance = new GeometryInstance({
+          geometry,
+          id: `building-${b.id}`,
+          attributes: {
+            color,
+          },
+        });
+
+        instances.push(instance);
       }
 
-      console.info(`[GDT] ${buildings.length} edificios OSM añadidos como Entity (extrudedHeight)`);
+      const primitive = new Primitive({
+        geometryInstances: instances,
+        appearance: new PerInstanceColorAppearance({
+          flat: false,
+          translucent: true,
+        }),
+        asynchronous: true,
+      });
 
-      // Centrar camara en el conjunto de edificios
-      await this.viewer.zoomTo(this.viewer.entities);
+      this.viewer.scene.primitives.add(primitive);
+      this.buildingsPrimitive = primitive;
+
+      console.info(`[GDT] ${instances.length} edificios OSM añadidos como Primitive (GeometryInstance batching, anclados al terreno)`);
+
+      return primitive;
     } catch (error) {
       console.warn('[GDT] No se pudieron cargar edificios OSM:', error);
+      return undefined;
     }
   }
 
@@ -339,6 +396,49 @@ export class GdtViewer {
 
     // Oculta el credito de Cesium en esquina (cumple licencia mostrandolo en "Acerca de")
     (this.viewer.cesiumWidget.creditContainer as HTMLElement).style.display = 'none';
+  }
+
+  /**
+   * Ajusta la exageracion vertical de la escena segun la altura de la camara.
+   *
+   * Vista regional (camara alta): exageracion fuerte para un relieve "epico".
+   * Vista urbana (camara baja): escala fiel para que los edificios mantengan
+   * proporcion realista con el terreno. Cesium aplica verticalExaggeration en
+   * runtime tanto al terreno como a las primitivas, por lo que los edificios
+   * permanecen anclados al suelo en cualquier nivel de exageracion.
+   *
+   * Se aplica una histeresis (minChangeThreshold) para evitar parpadeo cuando
+   * la camara oscila cerca del umbral de altura.
+   */
+  private setupDynamicExaggeration(): void {
+    if (!this.viewer) return;
+
+    const {
+      cameraAltitudeThresholdMeters,
+      regionalExaggeration,
+      urbanExaggeration,
+      minChangeThreshold,
+    } = DYNAMIC_EXAGGERATION;
+
+    const scene = this.viewer.scene;
+    const camera = this.viewer.camera;
+
+    const updateExaggeration = (): void => {
+      const altitude = camera.positionCartographic.height;
+      const target =
+        altitude > cameraAltitudeThresholdMeters
+          ? regionalExaggeration
+          : urbanExaggeration;
+
+      // Histeresis: solo aplicar si el cambio es significativo.
+      if (Math.abs(scene.verticalExaggeration - target) >= minChangeThreshold) {
+        scene.verticalExaggeration = target;
+      }
+    };
+
+    // Evaluacion inicial y suscripcion a cambios de camara.
+    updateExaggeration();
+    camera.changed.addEventListener(updateExaggeration);
   }
 
   /**
