@@ -149,12 +149,18 @@ test.describe('Carga y visualizacion del visor 3D', () => {
     await hillshadeCheckbox.click();
     await expect(hillshadeCheckbox).toBeChecked();
 
+    // Edificios OSM: implementado y toggleable
+    const buildingsOsmCheckbox = page.locator('#layer-buildings-osm');
+    await expect(buildingsOsmCheckbox).toBeEnabled();
+
+    // Curvas de nivel: implementada y toggleable
+    const contoursCheckbox = page.locator('#layer-contours');
+    await expect(contoursCheckbox).toBeEnabled();
+
     // Capas no implementadas: deshabilitadas con badge "Proximamente"
     const unimplementedIds = [
-      'layer-buildings-high',
-      'layer-buildings-low',
+      'layer-buildings-lidar',
       'layer-hydrography',
-      'layer-contours',
       'layer-camino-hitos',
     ];
     for (const id of unimplementedIds) {
@@ -162,7 +168,7 @@ test.describe('Carga y visualizacion del visor 3D', () => {
       await expect(checkbox).toBeDisabled();
     }
     const badges = page.locator('.layer-badge');
-    await expect(badges).toHaveCount(5);
+    await expect(badges).toHaveCount(3);
 
     // Cerrar el panel
     await page.click('#layers-panel .layers-close');

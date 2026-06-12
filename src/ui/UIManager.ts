@@ -174,8 +174,9 @@ export class UIManager {
         id: 'contours',
         name: 'Curvas de nivel',
         category: 'Vectorial',
-        implemented: false,
-        checked: false,
+        implemented: true,
+        checked: this.viewer.areContoursVisible(),
+        onToggle: () => this.viewer.toggleContours(),
       },
       {
         id: 'camino-hitos',

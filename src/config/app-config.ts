@@ -32,6 +32,28 @@ export const BUILDINGS_LOD = {
   lowDetailDistanceMeters: 5000,  // > 5 km: bajo detalle (OSM)
 } as const;
 
+/** Parametros de asentamiento visual de los edificios 3D OSM */
+export const BUILDINGS_RENDER = {
+  // Falda enterrada bajo la cota mas baja de la huella: ancla el edificio al
+  // terreno en pendiente sin que flote. La exageracion vertical la amplifica,
+  // por lo que basta un valor pequeno para que nunca asome sobre el suelo.
+  skirtMeters: 3,
+} as const;
+
+/** Parametros de render de las curvas de nivel (derivadas del DEM Focus) */
+export const CONTOURS_RENDER = {
+  masterIntervalMeters: 50,    // Curva maestra cada 50 m (resaltada)
+  masterColorCss: '#c0392b',   // Rojo ladrillo: maximo contraste sobre terreno
+  masterAlpha: 0.95,
+  minorColorCss: '#2c2c2c',    // Gris pizarra oscuro: legible sobre cualquier fondo
+  minorAlpha: 0.65,
+  masterWidth: 4.0,
+  minorWidth: 2.0,
+  haloColorCss: '#ffffff',     // Halo blanco para resaltar contorno sobre fondos oscuros
+  haloAlpha: 0.35,
+  haloWidthOffset: 2.5,        // El halo es haloWidthOffset px mas grueso que la curva
+} as const;
+
 /** URLs de tiles (versionadas para cache agresivo) */
 export const TILES_CONFIG = {
   baseUrl: '/tiles',

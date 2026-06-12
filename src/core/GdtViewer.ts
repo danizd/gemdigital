@@ -19,12 +19,17 @@ import {
   PerInstanceColorAppearance,
   Ellipsoid,
   sampleTerrainMostDetailed,
+  GroundPolylinePrimitive,
+  GroundPolylineGeometry,
+  PolylineColorAppearance,
 } from 'cesium';
 import {
   CATEDRAL_COORDINATES,
   INITIAL_CAMERA_VIEW,
   VIEWER_OPTIONS,
   DYNAMIC_EXAGGERATION,
+  BUILDINGS_RENDER,
+  CONTOURS_RENDER,
 } from '../config/app-config';
 
 /**
@@ -42,6 +47,22 @@ export class GdtViewer {
   private hillshadeVisible = false;
   private buildingsVisible = true;
   private buildingsPrimitive: Primitive | null = null;
+  private contoursPrimitive: GroundPolylinePrimitive | null = null;
+  private contoursHaloPrimitive: GroundPolylinePrimitive | null = null;
+  private contoursVisible = false;
+
+  /**
+   * Paleta de piedra del casco historico de Santiago (granito, caliza y teja).
+   * Tonos mas saturados y oscuros para resaltar sobre el terreno claro del
+   * hillshade y generar contraste visual de "primera vista epica".
+   */
+  private static readonly BUILDING_PALETTE: readonly Color[] = [
+    Color.fromCssColorString('#c17f59'), // caliza tostada intenso
+    Color.fromCssColorString('#8b5a3c'), // piedra ocre oscuro
+    Color.fromCssColorString('#a0522d'), // teja siena
+    Color.fromCssColorString('#6d5e50'), // granito marron
+    Color.fromCssColorString('#4a3f35'), // pizarra muy oscuro
+  ];
 
   constructor(containerId: string) {
     const element = document.getElementById(containerId);
@@ -101,6 +122,7 @@ export class GdtViewer {
     this.showHillshade();
 
     await this.addBuildingsOSMEntities();
+    await this.addContourLines();
 
     const { destination, distance } = INITIAL_CAMERA_VIEW;
     const initialCameraDestination = Cartesian3.fromDegrees(
@@ -304,17 +326,22 @@ export class GdtViewer {
         (b) => Array.isArray(b.positions) && b.positions.length >= 3
       );
 
-      // Muestreo de la elevacion del terreno bajo el primer vertice de cada
-      // edificio. Se hace en lote para minimizar peticiones al terrainProvider.
-      const groundSamples = validBuildings.map((b) =>
-        Cartographic.fromDegrees(b.positions[0][0], b.positions[0][1])
-      );
+      // Muestreo de la elevacion del terreno en TODOS los vertices de cada
+      // edificio. Muestrear solo el primer vertice dejaba la huella flotando o
+      // hundida en terreno en pendiente (la exageracion vertical amplifica el
+      // defecto). Se aplanan todos los vertices en un unico lote para minimizar
+      // las peticiones al terrainProvider y luego se mapean por rangos.
+      const groundSamples: Cartographic[] = [];
+      const vertexRanges: Array<{ start: number; count: number }> = [];
+      for (const b of validBuildings) {
+        vertexRanges.push({ start: groundSamples.length, count: b.positions.length });
+        for (const [lon, lat] of b.positions) {
+          groundSamples.push(Cartographic.fromDegrees(lon, lat));
+        }
+      }
       await sampleTerrainMostDetailed(this.viewer.terrainProvider, groundSamples);
 
       const instances: GeometryInstance[] = [];
-      const color = ColorGeometryInstanceAttribute.fromColor(
-        Color.SANDYBROWN.withAlpha(0.85)
-      );
 
       for (let i = 0; i < validBuildings.length; i++) {
         const b = validBuildings[i];
@@ -326,16 +353,35 @@ export class GdtViewer {
 
         const polygonHierarchy = new PolygonHierarchy(positions);
         const buildingHeight = b.height ?? 10.0;
-        // Altura del terreno muestreada (NaN si el tile no tiene dato): base 0.
-        const groundHeight = groundSamples[i].height || 0;
 
-        // Alturas reales en metros. Cesium aplica verticalExaggeration
-        // internamente tanto al terreno como a esta primitiva, por lo que NO
-        // se debe multiplicar manualmente: el edificio queda anclado al terreno.
+        // Cota minima y maxima del terreno bajo la huella (se ignoran muestras
+        // NaN de tiles sin dato). El rango describe la pendiente del solar.
+        const range = vertexRanges[i];
+        let minGround = Number.POSITIVE_INFINITY;
+        let maxGround = Number.NEGATIVE_INFINITY;
+        for (let v = 0; v < range.count; v++) {
+          const h = groundSamples[range.start + v].height;
+          if (!Number.isFinite(h)) continue;
+          if (h < minGround) minGround = h;
+          if (h > maxGround) maxGround = h;
+        }
+        if (!Number.isFinite(minGround)) {
+          minGround = 0;
+          maxGround = 0;
+        }
+
+        // Base enterrada bajo la cota mas baja (falda): garantiza que el
+        // edificio nunca flote en pendiente; el desnivel residual queda bajo
+        // tierra. El techo se referencia a la cota mas alta para no perder
+        // altura en la cara cuesta arriba. Cesium aplica verticalExaggeration a
+        // terreno y primitiva por igual, por lo que se trabaja en metros reales.
+        const baseHeight = minGround - BUILDINGS_RENDER.skirtMeters;
+        const roofHeight = maxGround + buildingHeight;
+
         const geometry = new PolygonGeometry({
           polygonHierarchy,
-          height: groundHeight,
-          extrudedHeight: groundHeight + buildingHeight,
+          height: baseHeight,
+          extrudedHeight: roofHeight,
           vertexFormat: PerInstanceColorAppearance.VERTEX_FORMAT,
         });
 
@@ -343,7 +389,10 @@ export class GdtViewer {
           geometry,
           id: `building-${b.id}`,
           attributes: {
-            color,
+            // Tonalidad de piedra estable por edificio (ver resolveBuildingColor).
+            color: ColorGeometryInstanceAttribute.fromColor(
+              this.resolveBuildingColor(String(b.id), buildingHeight)
+            ),
           },
         });
 
@@ -354,7 +403,7 @@ export class GdtViewer {
         geometryInstances: instances,
         appearance: new PerInstanceColorAppearance({
           flat: false,
-          translucent: true,
+          translucent: false, // Piedra opaca: aspecto de producto, no de dataset
         }),
         asynchronous: true,
       });
@@ -369,6 +418,174 @@ export class GdtViewer {
       console.warn('[GDT] No se pudieron cargar edificios OSM:', error);
       return undefined;
     }
+  }
+
+  /**
+   * Carga las curvas de nivel (GeoJSON derivado del DEM Focus) y las drapea
+   * sobre el terreno con GroundPolylinePrimitive (clamp-to-ground, RN-005).
+   * Las maestras (cada masterIntervalMeters) se resaltan en grosor y color.
+   * Se anade un halo blanco semitransparente detras de cada linea para que
+   * resalte sobre fondos oscuros del hillshade y del terreno.
+   */
+  private async addContourLines(): Promise<void> {
+    if (!this.viewer) return;
+    try {
+      const response = await fetch('./data/contours.geojson');
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+      const geojson = await response.json() as {
+        features: Array<{
+          properties: { elevacion_m: number };
+          geometry: { type: 'LineString' | 'MultiLineString'; coordinates: number[][] | number[][][] };
+        }>;
+      };
+
+      const masterColor = Color.fromCssColorString(CONTOURS_RENDER.masterColorCss)
+        .withAlpha(CONTOURS_RENDER.masterAlpha);
+      const minorColor = Color.fromCssColorString(CONTOURS_RENDER.minorColorCss)
+        .withAlpha(CONTOURS_RENDER.minorAlpha);
+      const haloColor = Color.fromCssColorString(CONTOURS_RENDER.haloColorCss)
+        .withAlpha(CONTOURS_RENDER.haloAlpha);
+
+      const instances: GeometryInstance[] = [];
+      const haloInstances: GeometryInstance[] = [];
+      let masterCount = 0;
+      let minorCount = 0;
+
+      for (const feature of geojson.features) {
+        const elevation = feature.properties?.elevacion_m ?? 0;
+        const isMaster = Math.round(elevation) % CONTOURS_RENDER.masterIntervalMeters === 0;
+        if (isMaster) masterCount++; else minorCount++;
+
+        const color = ColorGeometryInstanceAttribute.fromColor(isMaster ? masterColor : minorColor);
+        const width = isMaster ? CONTOURS_RENDER.masterWidth : CONTOURS_RENDER.minorWidth;
+        const haloWidth = width + CONTOURS_RENDER.haloWidthOffset;
+
+        const lines = feature.geometry.type === 'MultiLineString'
+          ? feature.geometry.coordinates as number[][][]
+          : [feature.geometry.coordinates as number[][]];
+
+        for (const line of lines) {
+          const flat = line.flat();
+          if (flat.length < 4) continue;
+          if (flat.some((c) => !Number.isFinite(c))) continue;
+
+          const positions = Cartesian3.fromDegreesArray(flat);
+
+          instances.push(new GeometryInstance({
+            geometry: new GroundPolylineGeometry({ positions, width }),
+            attributes: { color },
+          }));
+
+          haloInstances.push(new GeometryInstance({
+            geometry: new GroundPolylineGeometry({ positions, width: haloWidth }),
+            attributes: { color: ColorGeometryInstanceAttribute.fromColor(haloColor) },
+          }));
+        }
+      }
+
+      // Halo primero (detras), luego curvas (encima)
+      const haloPrimitive = new GroundPolylinePrimitive({
+        geometryInstances: haloInstances,
+        appearance: new PolylineColorAppearance(),
+        show: this.contoursVisible,
+        asynchronous: true,
+      });
+      this.viewer.scene.groundPrimitives.add(haloPrimitive);
+      this.contoursHaloPrimitive = haloPrimitive;
+
+      const primitive = new GroundPolylinePrimitive({
+        geometryInstances: instances,
+        appearance: new PolylineColorAppearance(),
+        show: this.contoursVisible,
+        asynchronous: true,
+      });
+      this.viewer.scene.groundPrimitives.add(primitive);
+      this.contoursPrimitive = primitive;
+
+      console.info(
+        `[GDT] ${instances.length} curvas cargadas (maestras=${masterCount}, menores=${minorCount}) con halo`
+      );
+    } catch (error) {
+      console.warn('[GDT] No se pudieron cargar las curvas de nivel:', error);
+    }
+  }
+
+  /**
+   * Activa la visibilidad de las curvas de nivel.
+   */
+  public showContours(): void {
+    if (this.contoursPrimitive) {
+      this.contoursPrimitive.show = true;
+    }
+    if (this.contoursHaloPrimitive) {
+      this.contoursHaloPrimitive.show = true;
+    }
+    this.contoursVisible = true;
+  }
+
+  /**
+   * Oculta la visibilidad de las curvas de nivel.
+   */
+  public hideContours(): void {
+    if (this.contoursPrimitive) {
+      this.contoursPrimitive.show = false;
+    }
+    if (this.contoursHaloPrimitive) {
+      this.contoursHaloPrimitive.show = false;
+    }
+    this.contoursVisible = false;
+  }
+
+  /**
+   * Alterna la visibilidad de las curvas de nivel.
+   * Devuelve el estado actual despues del toggle.
+   */
+  public toggleContours(): boolean {
+    if (this.contoursVisible) {
+      this.hideContours();
+    } else {
+      this.showContours();
+    }
+    return this.contoursVisible;
+  }
+
+  /**
+   * Indica si las curvas de nivel estan visibles actualmente.
+   */
+  public areContoursVisible(): boolean {
+    return this.contoursVisible;
+  }
+
+  /**
+   * Resuelve el color de un edificio combinando una tonalidad base estable
+   * (hash del id, para que un mismo edificio conserve su color entre cargas)
+   * con un ligero ajuste por altura: los mas altos se oscurecen y los mas
+   * bajos se aclaran, reforzando la textura del casco antiguo.
+   */
+  private resolveBuildingColor(id: string, heightMeters: number): Color {
+    const palette = GdtViewer.BUILDING_PALETTE;
+    const base = palette[this.hashStringToInt(id) % palette.length];
+
+    // Variacion de contraste por altura: edificios altos se oscurecen mas
+    // (sombra propia), bajos se aclaran (iluminacion directa).
+    const lightnessShift = heightMeters > 20 ? -0.12 : heightMeters < 8 ? 0.10 : -0.03;
+    const result = Color.clone(base, new Color());
+    return lightnessShift > 0
+      ? result.brighten(lightnessShift, result)
+      : result.darken(-lightnessShift, result);
+  }
+
+  /**
+   * Hash determinista de una cadena a entero no negativo. Permite asignar un
+   * color estable por edificio sin depender del orden de carga.
+   */
+  private hashStringToInt(value: string): number {
+    let hash = 0;
+    for (let i = 0; i < value.length; i++) {
+      hash = (Math.imul(hash, 31) + value.charCodeAt(i)) | 0;
+    }
+    return Math.abs(hash);
   }
 
   /**
